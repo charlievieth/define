@@ -48,50 +48,6 @@ func (c *context) checkTypes(dirname string) (*types.Info, error) {
 	return info, pkgErr
 }
 
-func (c *context) parseSourceFiles_XXX(dirname string) ([]*ast.File, *token.FileSet, error) {
-	names, err := c.PkgFiles(dirname)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	type response struct {
-		af  *ast.File
-		err error
-	}
-	var reschs []chan *response
-
-	fset := token.NewFileSet()
-	for _, name := range names {
-		path := filepath.Join(dirname, name)
-		var src []byte
-		if path == c.filepath {
-			src = c.src
-		}
-		ch := make(chan *response)
-		reschs = append(reschs, ch)
-		go func(path string, src []byte, ch chan *response) {
-			af, err := parseFile(fset, path, src)
-			ch <- &response{af, err}
-		}(path, src, ch)
-	}
-
-	var first error
-	var files []*ast.File
-	for _, ch := range reschs {
-		switch r := <-ch; {
-		case r.af != nil:
-			files = append(files, r.af)
-		case r.err != nil && first == nil:
-			first = r.err
-		}
-	}
-
-	if files == nil && first == nil {
-		first = errors.New("error parsing directory: " + dirname)
-	}
-	return files, fset, first
-}
-
 func (c *context) parseSourceFiles(dirname string) ([]*ast.File, *token.FileSet, error) {
 	names, err := c.PkgFiles(dirname)
 	if err != nil {
