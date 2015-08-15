@@ -3,6 +3,7 @@ package define
 import (
 	"errors"
 	"go/build"
+	"golang.org/x/tools/go/types"
 	"io/ioutil"
 	"unicode"
 	"unicode/utf8"
@@ -27,7 +28,23 @@ type Definition struct {
 	Pos  Position
 }
 
-func Define(filename string, cursor int, src interface{}, ctxt *build.Context) (*Position, error) {
+func ObjectOf(filename string, cursor int) (types.Object, error) {
+	text, off, err := readSourceOffset(filename, cursor, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkSelection(text, off); err != nil {
+		return nil, err
+	}
+	ctx, err := newContext(filename, text, &build.Default)
+	if err != nil {
+		return nil, err
+	}
+	_ = ctx
+	return nil, nil
+}
+
+func Define(filename string, cursor int, src interface{}) (*Position, error) {
 	text, off, err := readSourceOffset(filename, cursor, src)
 	if err != nil {
 		return nil, err
@@ -35,10 +52,11 @@ func Define(filename string, cursor int, src interface{}, ctxt *build.Context) (
 	if err := checkSelection(text, off); err != nil {
 		return nil, err
 	}
-	if ctxt == nil {
-		ctxt = &build.Default // TODO: Improve
+	ctx, err := newContext(filename, text, &build.Default)
+	if err != nil {
+		return nil, err
 	}
-	_ = text
+	_ = ctx
 	_ = off
 	return nil, nil
 }
