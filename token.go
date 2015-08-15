@@ -1,35 +1,35 @@
-package find
+package define
 
 import (
 	"go/scanner"
 	"go/token"
 )
 
-type Token struct {
-	off int
-	end int
-	pos token.Pos
-	tok token.Token
+type tokenPos struct {
+	off int         // source code position
+	end int         // source code position
+	pos token.Pos   // toke fileset pos
+	tok token.Token // underlying token
 }
 
-func (t Token) Pos() int { return t.off }
+func (t tokenPos) Pos() int { return t.off }
 
-func (t Token) End() int { return t.end }
+func (t tokenPos) End() int { return t.end }
 
-func (t Token) Valid() bool {
+func (t tokenPos) Valid() bool {
 	return t.off != 0 && t.end != 0 && t.tok != token.ILLEGAL
 }
 
-type Iterator struct {
-	tokens []Token
+type iterator struct {
+	tokens []tokenPos
 	index  int
 }
 
-func (i *Iterator) Token() Token {
+func (i *iterator) Token() tokenPos {
 	return i.tokens[i.index]
 }
 
-func (i *Iterator) Previous() (t Token) {
+func (i *iterator) Previous() (t tokenPos) {
 	if i.index > 0 {
 		i.index--
 		t = i.tokens[i.index]
@@ -37,7 +37,7 @@ func (i *Iterator) Previous() (t Token) {
 	return t
 }
 
-func (i *Iterator) Next() (t Token) {
+func (i *iterator) Next() (t tokenPos) {
 	if i.index < len(i.tokens)-1 {
 		i.index++
 		t = i.tokens[i.index]
@@ -45,10 +45,10 @@ func (i *Iterator) Next() (t Token) {
 	return t
 }
 
-func newIterator(file *token.File, fset *token.FileSet, src []byte, offset int) Iterator {
+func newIterator(file *token.File, fset *token.FileSet, src []byte, offset int) iterator {
 	scan := &scanner.Scanner{}
 	scan.Init(file, src, nil, 0)
-	tokens := make([]Token, 0, 1024)
+	tokens := make([]tokenPos, 0, 1024)
 	index := 0
 	for {
 		pos, tok, lit := scan.Scan()
@@ -56,10 +56,10 @@ func newIterator(file *token.File, fset *token.FileSet, src []byte, offset int) 
 			break
 		}
 		off := fset.Position(pos).Offset
-		tokens = append(tokens, Token{
+		tokens = append(tokens, tokenPos{
 			off: off,
-			pos: pos,
 			end: off + len(lit),
+			pos: pos,
 			tok: tok,
 		})
 		if offset <= off {
@@ -67,13 +67,13 @@ func newIterator(file *token.File, fset *token.FileSet, src []byte, offset int) 
 		}
 		index++
 	}
-	return Iterator{
+	return iterator{
 		tokens: tokens,
 		index:  index,
 	}
 }
 
-func cursorContext(file *token.File, fset *token.FileSet, src []byte, offset int) (current, parent Token) {
+func cursorContext(file *token.File, fset *token.FileSet, src []byte, offset int) (current, parent tokenPos) {
 	iter := newIterator(file, fset, src, offset)
 	switch iter.Previous().tok {
 	case token.PERIOD, token.COMMA, token.LBRACE:
