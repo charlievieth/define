@@ -126,10 +126,7 @@ func newObject(obj types.Object) (*Object, error) {
 			o.PkgPath = p.Path()
 			o.PkgName = p.Name()
 		}
-		sig, ok := obj.Type().(*types.Signature)
-		if !ok {
-			return nil, errors.New("func not types.Signature")
-		}
+		sig := obj.Type().(*types.Signature)
 		if r := sig.Recv(); r != nil {
 			o.ObjType = Method
 			switch t := r.Type().(type) {
