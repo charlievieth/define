@@ -183,6 +183,10 @@ func (c *context) tokenFile() (*token.File, error) {
 	return c.fset.File(c.af.Pos()), nil
 }
 
+func (c *context) identAtOffset(offset int) {
+
+}
+
 func isGoSource(s string, includeTest bool) bool {
 	return len(s) > len(".go") && s[0] != '_' && s[0] != '.' &&
 		hasSuffix(s, ".go") && (includeTest || !hasSuffix(s, "_test.go"))

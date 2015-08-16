@@ -227,34 +227,52 @@ func (v *packageVistor) Visit(node ast.Node) ast.Visitor {
 }
 
 type posVisiter struct {
-	id    *ast.Ident
-	pos   token.Pos
+	id1   *ast.Ident
+	id2   *ast.Ident
+	pos1  token.Pos
+	pos2  token.Pos
 	found bool
 }
 
 func (v *posVisiter) Visit(node ast.Node) (w ast.Visitor) {
-	if node == nil || v.found {
+	if node == nil {
+		return v
+	}
+	if v.found {
 		return nil
 	}
-	if node.Pos() <= v.pos && v.pos <= node.End() {
+	pos := node.Pos()
+	end := node.End()
+	if pos <= v.pos1 && v.pos1 <= end {
 		if vv, ok := node.(*ast.Ident); ok {
-			v.id = vv
-			v.found = true
+			v.id1 = vv
+			if v.pos2 == 0 || v.id2 != nil {
+				v.found = true
+			}
+		}
+	}
+	if v.pos2 != 0 && pos <= v.pos2 && v.pos2 <= end {
+		if vv, ok := node.(*ast.Ident); ok {
+			v.id2 = vv
+			if v.id1 != nil {
+				v.found = true
+			}
 		}
 	}
 	return v
 }
 
-func identAtPos(af *ast.File, pos token.Pos) (*ast.Ident, error) {
+func identAtOffset(af *ast.File, curr, prev token.Pos) (*ast.Ident, *ast.Ident, error) {
 	if af == nil {
-		return nil, errors.New("nil ast.File")
+		return nil, nil, errors.New("nil ast.File")
 	}
 	v := posVisiter{
-		pos: pos,
+		pos1: curr,
+		pos2: prev,
 	}
 	ast.Walk(&v, af)
-	if v.id == nil {
-		return nil, errors.New("unable to find ident")
+	if v.id1 == nil && v.id2 == nil {
+		return nil, nil, errors.New("unable to find ident")
 	}
-	return v.id, nil
+	return v.id1, v.id2, nil
 }

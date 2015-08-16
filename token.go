@@ -73,7 +73,7 @@ func newIterator(file *token.File, fset *token.FileSet, src []byte, offset int) 
 	}
 }
 
-func cursorContext(file *token.File, fset *token.FileSet, src []byte, offset int) (current, parent tokenPos) {
+func cursorContext(file *token.File, fset *token.FileSet, src []byte, offset int) (current, previous tokenPos) {
 	iter := newIterator(file, fset, src, offset)
 	switch iter.Previous().tok {
 	case token.PERIOD, token.COMMA, token.LBRACE:
@@ -82,7 +82,7 @@ func cursorContext(file *token.File, fset *token.FileSet, src []byte, offset int
 		current = iter.Token()
 	}
 	if iter.Previous().tok == token.PERIOD {
-		parent = iter.Previous()
+		previous = iter.Previous()
 	}
-	return current, parent
+	return current, previous
 }
