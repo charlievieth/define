@@ -1,7 +1,6 @@
 package define
 
 import (
-	"errors"
 	"fmt"
 	"go/token"
 	"golang.org/x/tools/go/types"

@@ -2,11 +2,14 @@ package define
 
 import (
 	"errors"
+	"go/ast"
 	"go/build"
-	"golang.org/x/tools/go/types"
+	"go/token"
 	"io/ioutil"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/tools/go/types"
 )
 
 type Config struct {
@@ -36,6 +39,27 @@ func ObjectOf(filename string, cursor int) (types.Object, error) {
 	return nil, nil
 }
 
+func NodeAtOffset(filename string, cursor int, src interface{}) (ast.Node, token.Position, error) {
+	var pos token.Position
+	text, off, err := readSourceOffset(filename, cursor, src)
+	if err != nil {
+		return nil, pos, err
+	}
+	if err := checkSelection(text, off); err != nil {
+		return nil, pos, err
+	}
+	af, fset, err := parseFile(filename, text)
+	if err != nil {
+		return nil, pos, err
+	}
+	node, err := nodeAtOffset(af, fset, cursor)
+	if err != nil {
+		return nil, pos, err
+	}
+	pos = fset.Position(node.Pos())
+	return node, pos, nil
+}
+
 func Define(filename string, cursor int, src interface{}) (*Position, error) {
 	text, off, err := readSourceOffset(filename, cursor, src)
 	if err != nil {
@@ -44,12 +68,15 @@ func Define(filename string, cursor int, src interface{}) (*Position, error) {
 	if err := checkSelection(text, off); err != nil {
 		return nil, err
 	}
-	ctx, err := newContext(filename, text, &build.Default)
+	af, fset, err := parseFile(filename, text)
 	if err != nil {
 		return nil, err
 	}
-	_ = ctx
-	_ = off
+	node, err := nodeAtOffset(af, fset, cursor)
+	if err != nil {
+		return nil, err
+	}
+	_ = node
 	return nil, nil
 }
 

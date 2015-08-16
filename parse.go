@@ -163,6 +163,15 @@ func (c *context) pkgFiles(dir string) ([]string, error) {
 	return list, nil
 }
 
+func parseFile(filename string, src []byte) (*ast.File, *token.FileSet, error) {
+	fset := token.NewFileSet()
+	af, err := parser.ParseFile(fset, filename, src, parser.ParseComments)
+	if af == nil {
+		return nil, nil, err
+	}
+	return af, fset, nil
+}
+
 func (c *context) MatchFile(dir, name string) (match bool) {
 	if isGoSource(name, c.incTest) {
 		match, _ = c.ctx.MatchFile(dir, name)
@@ -181,10 +190,6 @@ func (c *context) tokenFile() (*token.File, error) {
 		return nil, errors.New("invalid file pos")
 	}
 	return c.fset.File(c.af.Pos()), nil
-}
-
-func (c *context) identAtOffset(offset int) {
-
 }
 
 func isGoSource(s string, includeTest bool) bool {

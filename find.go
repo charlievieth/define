@@ -262,7 +262,7 @@ func (v *posVisiter) Visit(node ast.Node) (w ast.Visitor) {
 	return v
 }
 
-func identAtOffset(af *ast.File, curr, prev token.Pos) (*ast.Ident, *ast.Ident, error) {
+func identAtPos(af *ast.File, curr, prev token.Pos) (*ast.Ident, *ast.Ident, error) {
 	if af == nil {
 		return nil, nil, errors.New("nil ast.File")
 	}
@@ -275,4 +275,77 @@ func identAtOffset(af *ast.File, curr, prev token.Pos) (*ast.Ident, *ast.Ident, 
 		return nil, nil, errors.New("unable to find ident")
 	}
 	return v.id1, v.id2, nil
+}
+
+type offsetVisitor struct {
+	pos  token.Pos
+	node ast.Node
+}
+
+func (v *offsetVisitor) found(start, end token.Pos) bool {
+	return start <= v.pos && v.pos <= end
+}
+
+func (v *offsetVisitor) Visit(node ast.Node) (w ast.Visitor) {
+	if node == nil || v.node != nil {
+		return nil
+	}
+	if node.End() < v.pos {
+		return v
+	}
+	var start token.Pos
+	switch n := node.(type) {
+	case *ast.Ident:
+		start = n.NamePos
+	case *ast.SelectorExpr:
+		start = n.Sel.NamePos
+	case *ast.ImportSpec:
+		start = n.Pos()
+	case *ast.StructType:
+		if n.Fields == nil {
+			break
+		}
+		// Look for anonymous bare field.
+		for _, field := range n.Fields.List {
+			if field.Names != nil {
+				continue
+			}
+			t := field.Type
+			if pt, ok := field.Type.(*ast.StarExpr); ok {
+				t = pt.X
+			}
+			if id, ok := t.(*ast.Ident); ok {
+				if v.found(id.NamePos, id.End()) {
+					v.node = id
+					return nil
+				}
+			}
+		}
+	default:
+		return v
+	}
+	if v.found(start, node.End()) {
+		v.node = node
+		return nil
+	}
+	return v
+}
+
+// nodeAtOffset, returns the ast.Node for the given offset.
+// Node types: *ast.Ident, *ast.SelectorExpr, *ast.ImportSpec
+func nodeAtOffset(af *ast.File, fset *token.FileSet, offset int) (ast.Node, error) {
+	file := fset.File(af.Pos())
+	if file == nil {
+		return nil, errors.New("ast.File not in token.FileSet")
+	}
+	// Prevent file.Pos from panicking.
+	if 0 > offset || offset > file.Size() {
+		return nil, fmt.Errorf("invalid offset: %d", offset)
+	}
+	v := &offsetVisitor{pos: file.Pos(offset)}
+	ast.Walk(v, af)
+	if v.node == nil {
+		return nil, fmt.Errorf("no node at offset: %d", offset)
+	}
+	return v.node, nil
 }
