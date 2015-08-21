@@ -91,6 +91,7 @@ func (c *context) findObjectPos(o *Object) (*token.Position, error) {
 	if err != nil {
 		return nil, err
 	}
+	_ = names
 	return nil, nil
 }
 
