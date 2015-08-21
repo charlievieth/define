@@ -282,7 +282,7 @@ type offsetVisitor struct {
 	node ast.Node
 }
 
-func (v *offsetVisitor) found(start, end token.Pos) bool {
+func (v offsetVisitor) found(start, end token.Pos) bool {
 	return start <= v.pos && v.pos <= end
 }
 
@@ -302,6 +302,7 @@ func (v *offsetVisitor) Visit(node ast.Node) (w ast.Visitor) {
 	case *ast.ImportSpec:
 		start = n.Pos()
 	case *ast.StructType:
+		// TODO: Remove if unnecessary
 		if n.Fields == nil {
 			break
 		}
@@ -321,6 +322,7 @@ func (v *offsetVisitor) Visit(node ast.Node) (w ast.Visitor) {
 				}
 			}
 		}
+		return v
 	default:
 		return v
 	}
@@ -339,7 +341,7 @@ func nodeAtOffset(af *ast.File, fset *token.FileSet, offset int) (ast.Node, erro
 		return nil, errors.New("ast.File not in token.FileSet")
 	}
 	// Prevent file.Pos from panicking.
-	if 0 > offset || offset > file.Size() {
+	if offset < 0 || file.Size() < offset {
 		return nil, fmt.Errorf("invalid offset: %d", offset)
 	}
 	v := &offsetVisitor{pos: file.Pos(offset)}

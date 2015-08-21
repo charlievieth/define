@@ -2,6 +2,7 @@ package define
 
 import (
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/build"
 	"go/token"
@@ -21,22 +22,6 @@ type Definition struct {
 	Name string
 	Type string
 	Pos  Position
-}
-
-func ObjectOf(filename string, cursor int) (types.Object, error) {
-	text, off, err := readSourceOffset(filename, cursor, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkSelection(text, off); err != nil {
-		return nil, err
-	}
-	ctx, err := newContext(filename, text, &build.Default)
-	if err != nil {
-		return nil, err
-	}
-	_ = ctx
-	return nil, nil
 }
 
 func NodeAtOffset(filename string, cursor int, src interface{}) (ast.Node, token.Position, error) {
@@ -60,6 +45,40 @@ func NodeAtOffset(filename string, cursor int, src interface{}) (ast.Node, token
 	return node, pos, nil
 }
 
+func ObjectOf(filename string, cursor int) (types.Object, *types.Selection, error) {
+	text, off, err := readSourceOffset(filename, cursor, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := checkSelection(text, off); err != nil {
+		return nil, nil, err
+	}
+	af, fset, err := parseFile(filename, text)
+	if err != nil {
+		return nil, nil, err
+	}
+	node, err := nodeAtOffset(af, fset, cursor)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx := newContext(filename, af, fset, &build.Default)
+	info := &types.Info{
+		Defs: make(map[*ast.Ident]types.Object),
+		Uses: make(map[*ast.Ident]types.Object),
+	}
+	if _, ok := node.(*ast.SelectorExpr); ok {
+		info.Selections = make(map[*ast.SelectorExpr]*types.Selection)
+	}
+	conf := types.Config{}
+	if _, err := conf.Check(ctx.dirname, ctx.fset, ctx.files, info); err != nil {
+		// Return error only if missing type info.
+		if len(info.Defs) == 0 && len(info.Uses) == 0 {
+			return nil, nil, err
+		}
+	}
+	return lookupType(node, info)
+}
+
 func Define(filename string, cursor int, src interface{}) (*Position, error) {
 	text, off, err := readSourceOffset(filename, cursor, src)
 	if err != nil {
@@ -76,56 +95,102 @@ func Define(filename string, cursor int, src interface{}) (*Position, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = node
+	ctx := newContext(filename, af, fset, &build.Default)
+	info := newTypeInfo(node)
+	conf := types.Config{}
+	if _, err := conf.Check(ctx.dirname, ctx.fset, ctx.files, info); err != nil {
+		// Return error only if missing type info.
+		if len(info.Defs) == 0 && len(info.Uses) == 0 {
+			return nil, err
+		}
+	}
+
 	return nil, nil
+}
+
+func newTypeInfo(node ast.Node) *types.Info {
+	info := types.Info{
+		Defs: make(map[*ast.Ident]types.Object),
+		Uses: make(map[*ast.Ident]types.Object),
+	}
+	if _, ok := node.(*ast.SelectorExpr); ok {
+		info.Selections = make(map[*ast.SelectorExpr]*types.Selection)
+	}
+	return &info
+}
+
+func lookupType(node ast.Node, info *types.Info) (types.Object, *types.Selection, error) {
+	switch n := node.(type) {
+	case *ast.Ident:
+		return info.ObjectOf(n), nil, nil
+	case *ast.ImportSpec:
+		return info.ObjectOf(n.Name), nil, nil
+	case *ast.SelectorExpr:
+		if sel, ok := info.Selections[n]; ok {
+			return sel.Obj(), sel, nil
+		}
+		return info.ObjectOf(n.Sel), nil, nil
+	case *ast.StructType:
+		return nil, nil, fmt.Errorf("unexpected struct: %#v", node)
+	default:
+		return nil, nil, fmt.Errorf("unexpected type: %#v", node)
+	}
+	return nil, nil, errors.New("object not found...")
 }
 
 func checkSelection(src []byte, off int) error {
 	// Just to be safe
-	if 0 > off || off > len(src) {
-		return errors.New("invalid source offset")
+	if off < 0 {
+		return errors.New("invalid selection: non-positive offset")
 	}
-	r, _ := utf8.DecodeRune(src[off:])
-	if !unicode.IsPrint(r) {
-		return errors.New("invalid Go source")
-	}
-	if unicode.IsSpace(r) {
-		return errors.New("nothing to find: whitespace")
+	if off >= len(src) {
+		return errors.New("invalid selection: offset out of range")
 	}
 	switch src[off] {
 	case '!', '%', '&', '(', ')', '*', '+', ',', '-', '/', ':', ';', '<', '=',
 		'>', '[', ']', '^', '{', '|', '}':
-		return errors.New("nothing to find: reserved Go token")
+		return errors.New("invalid selection: reserved Go token")
+	}
+	r, _ := utf8.DecodeRune(src[off:])
+	if !unicode.IsPrint(r) {
+		return errors.New("invalid selection: not valid Go source")
+	}
+	if unicode.IsSpace(r) {
+		return errors.New("invalid selection: whitespace")
 	}
 	return nil
 }
 
 func readSourceOffset(filename string, cursor int, src interface{}) ([]byte, int, error) {
 	if cursor < 0 {
-		return nil, -1, errors.New("non-positive cursor offset")
+		return nil, -1, errors.New("non-positive offset")
 	}
+	var (
+		b   []byte
+		n   int
+		err error
+	)
 	switch s := src.(type) {
-	case string:
-		if cursor >= len(s) {
-			return nil, -1, errors.New("invalid cursor offset")
-		}
-		return []byte(s), stringOffset(s, cursor), nil
 	case []byte:
-		if cursor >= len(s) {
-			return nil, -1, errors.New("invalid cursor offset")
+		b = s
+	case string:
+		if cursor < len(s) {
+			n = stringOffset(s, cursor)
+			b = []byte(s)
 		}
-		return s, byteOffset(s, cursor), nil
 	case nil:
-		b, err := ioutil.ReadFile(filename)
-		if err != nil {
-			return nil, -1, err
-		}
-		if cursor >= len(b) {
-			return nil, -1, errors.New("invalid cursor offset")
-		}
-		return b, byteOffset(b, cursor), nil
+		b, err = ioutil.ReadFile(filename)
+	default:
+		err = errors.New("invalid source")
 	}
-	return nil, -1, errors.New("invalid source")
+	if err == nil && n == 0 {
+		if cursor < len(b) {
+			n = byteOffset(b, cursor)
+		} else {
+			err = errors.New("offset out of range")
+		}
+	}
+	return b, n, err
 }
 
 func stringOffset(src string, off int) int {
@@ -139,6 +204,7 @@ func stringOffset(src string, off int) int {
 }
 
 func byteOffset(src []byte, off int) int {
+	// TODO: This needs to tested.
 	var i int
 	for len(src) != 0 {
 		if off == 0 {
@@ -163,3 +229,33 @@ func readSource(filename string, src interface{}) ([]byte, error) {
 	}
 	return nil, errors.New("invalid source")
 }
+
+/*
+func readSourceOffset(filename string, cursor int, src interface{}) ([]byte, int, error) {
+	if cursor < 0 {
+		return nil, -1, errors.New("non-positive cursor offset")
+	}
+	switch s := src.(type) {
+	case string:
+		if cursor >= len(s) {
+			return nil, -1, errors.New("offset out of range")
+		}
+		return []byte(s), stringOffset(s, cursor), nil
+	case []byte:
+		if cursor >= len(s) {
+			return nil, -1, errors.New("offset out of range")
+		}
+		return s, byteOffset(s, cursor), nil
+	case nil:
+		b, err := ioutil.ReadFile(filename)
+		if err != nil {
+			return nil, -1, err
+		}
+		if cursor >= len(b) {
+			return nil, -1, errors.New("offset out of range")
+		}
+		return b, byteOffset(b, cursor), nil
+	}
+	return nil, -1, errors.New("invalid source")
+}
+*/

@@ -1,6 +1,7 @@
 package define
 
 import (
+	"errors"
 	"fmt"
 	"go/token"
 	"golang.org/x/tools/go/types"
@@ -76,6 +77,41 @@ type Object struct {
 	Methods  []string
 }
 
+func newSelector(sel *types.Selection) (*Object, error) {
+	if sel.Obj() == nil {
+		return nil, errors.New("nil Selection object")
+	}
+	o := &Object{
+		Name: sel.Obj().Name(),
+	}
+	if p := sel.Obj().Pkg(); p != nil {
+		o.PkgPath = p.Path()
+		o.PkgName = p.Name()
+	}
+	switch t := sel.Recv().(type) {
+	case *types.Named:
+		if t.Obj() == nil {
+			break // WARN: error
+		}
+		o.Parent = t.Obj().Name()
+		if p := t.Obj().Pkg(); p != nil {
+			o.PkgPath = p.Path()
+			o.PkgName = p.Name()
+		}
+	}
+	switch sel.Kind() {
+	case types.FieldVal:
+		o.IsField = true
+		o.ObjType = Var
+	case types.MethodVal:
+		o.ObjType = Method
+	case types.MethodExpr:
+		// TODO: Fix
+		o.ObjType = Method
+	}
+	return o, nil
+}
+
 func newObject(obj types.Object) (*Object, error) {
 	o := &Object{
 		Name: obj.Name(),
@@ -85,10 +121,8 @@ func newObject(obj types.Object) (*Object, error) {
 		o.PkgName = obj.Pkg().Name()
 	}
 	switch typ := obj.(type) {
-
 	case *types.Const:
 		o.ObjType = Const
-
 	case *types.Var:
 		switch t := typ.Type().(type) {
 		case *types.Named:
@@ -101,24 +135,20 @@ func newObject(obj types.Object) (*Object, error) {
 					o.PkgName = p.Name()
 				}
 			}
-		case *types.Signature:
-			// Need to walk back to the declaration
-
-			// WARN: Remove
-			o.ObjType = Var
-			o.IsField = typ.IsField()
 		default:
 			o.ObjType = Var
 			o.IsField = typ.IsField()
+			if p := typ.Pkg(); p != nil {
+				o.PkgPath = p.Path()
+				o.PkgName = p.Name()
+			}
 		}
-
 	case *types.TypeName:
 		o.ObjType = TypeName
 		if p := typ.Pkg(); p != nil {
 			o.PkgPath = p.Path()
 			o.PkgName = p.Name()
 		}
-
 	case *types.Func:
 		o.ObjType = Func
 		if p := typ.Pkg(); p != nil {
@@ -130,7 +160,22 @@ func newObject(obj types.Object) (*Object, error) {
 			o.ObjType = Method
 			switch t := r.Type().(type) {
 			case *types.Pointer:
-				o.Parent = elemTypeName(t.Elem().String())
+				// WARN: This shouldnt happen...
+				switch tt := t.Elem().(type) {
+				case *types.Named:
+					if tt.Obj() != nil {
+						o.Parent = tt.Obj().Name()
+					}
+				case *types.Interface:
+					o.ObjType = Interface
+					o.Methods = make([]string, tt.NumMethods())
+					for i := 0; i < tt.NumEmbeddeds(); i++ {
+						// WARN
+						o.Methods[i] = tt.Method(i).Name()
+					}
+				default:
+					o.Parent = elemTypeName(t.Elem().String())
+				}
 			case *types.Named:
 				if t.Obj() != nil {
 					o.Parent = t.Obj().Name()
@@ -145,6 +190,7 @@ func newObject(obj types.Object) (*Object, error) {
 				// TODO: This is gonna be hard
 			default:
 				// WARN
+				o.Parent = elemTypeName(t.String())
 			}
 		}
 
