@@ -1,6 +1,7 @@
 package define
 
 import (
+	"bytes"
 	"errors"
 	"go/ast"
 	"go/build"
@@ -83,15 +84,38 @@ func (c *context) checkTypes(dirname string) error {
 }
 
 func (c *context) findObjectPos(o *Object) (*token.Position, error) {
-	dir, err := c.pkgPath(o.PkgPath)
+	paths, err := c.pkgPaths(o.PkgPath)
 	if err != nil {
 		return nil, err
 	}
-	names, err := c.pkgFiles(dir)
+	for _, path := range paths {
+		names, err := c.pkgFiles(path)
+		if err != nil {
+			continue
+		}
+		_ = names
+	}
+
+	return nil, nil
+}
+
+// WARN: holy shit rename this thing
+func (c *context) findObjectInPkg(path string, o *Object) (*token.Position, error) {
+	// Not really names - actually full file paths
+	names, err := c.pkgFiles(path)
 	if err != nil {
 		return nil, err
 	}
-	_ = names
+	for _, name := range names {
+		b, err := ioutil.ReadFile(name)
+		if err != nil {
+			continue
+		}
+		if !bytes.Contains(b, []byte(o.Name)) {
+			continue
+		}
+
+	}
 	return nil, nil
 }
 
@@ -103,6 +127,19 @@ func (c *context) pkgPath(name string) (string, error) {
 		}
 	}
 	return "", errors.New("package path not found")
+}
+
+func (c *context) pkgPaths(name string) (paths []string, err error) {
+	for _, dir := range c.ctx.SrcDirs() {
+		path := filepath.Join(dir, name)
+		if fi, err := os.Stat(name); err != nil && fi.IsDir() {
+			paths = append(paths, path)
+		}
+	}
+	if len(paths) == 0 {
+		err = errors.New("package path not found")
+	}
+	return
 }
 
 func (c *context) parseTargetDir() error {
