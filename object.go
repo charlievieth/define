@@ -66,6 +66,11 @@ func (p Position) String() string {
 	return s
 }
 
+// WARN: Remove if unused.
+type pkger interface {
+	Pkg() *types.Package
+}
+
 type Object struct {
 	Name     string
 	Parent   string // parent type
@@ -75,6 +80,22 @@ type Object struct {
 	Position Position
 	IsField  bool // only relevant when finding imported types
 	Methods  []string
+	Pos      token.Pos
+}
+
+// WARN: Remove if unused.
+func (o *Object) setPkg(p *types.Package) {
+	if p != nil {
+		o.PkgPath = p.Path()
+		o.PkgName = p.Name()
+	}
+}
+
+func (o *Object) setParent(obj types.Object) {
+	if obj != nil {
+		o.Parent = obj.Name()
+		o.setPkg(obj.Pkg())
+	}
 }
 
 func newSelector(sel *types.Selection) (*Object, error) {
@@ -84,20 +105,13 @@ func newSelector(sel *types.Selection) (*Object, error) {
 	o := &Object{
 		Name: sel.Obj().Name(),
 	}
-	if p := sel.Obj().Pkg(); p != nil {
-		o.PkgPath = p.Path()
-		o.PkgName = p.Name()
-	}
-	switch t := sel.Recv().(type) {
+	o.setPkg(sel.Obj().Pkg())
+	switch t := derefType(sel.Recv()).(type) {
 	case *types.Named:
-		if t.Obj() == nil {
-			break // WARN: error
-		}
-		o.Parent = t.Obj().Name()
-		if p := t.Obj().Pkg(); p != nil {
-			o.PkgPath = p.Path()
-			o.PkgName = p.Name()
-		}
+		o.setParent(t.Obj())
+	default:
+		// TODO: log type
+		// Locally declared type, maybe an anonymous struct.
 	}
 	switch sel.Kind() {
 	case types.FieldVal:
@@ -115,6 +129,57 @@ func newSelector(sel *types.Selection) (*Object, error) {
 func newObject(obj types.Object) (*Object, error) {
 	o := &Object{
 		Name: obj.Name(),
+		Pos:  obj.Pos(),
+	}
+	o.setPkg(obj.Pkg())
+	switch typ := obj.(type) {
+	case *types.Const:
+		o.ObjType = Const
+	case *types.TypeName:
+		o.ObjType = TypeName
+	case *types.Var:
+		o.ObjType = Var
+		o.IsField = typ.IsField()
+		if t, ok := derefType(typ.Type()).(*types.Named); ok {
+			o.ObjType = TypeName
+			// WARN: This looks wrong
+			o.IsField = false
+			if t.Obj() != nil {
+				o.Name = t.Obj().Name()
+				o.setPkg(t.Obj().Pkg())
+			}
+		}
+	case *types.Func:
+		switch sig := obj.Type().(type) {
+		case nil:
+			o.ObjType = Func
+		case *types.Signature:
+			switch r := derefType(sig.Recv().Type()).(type) {
+			case *types.Named:
+				o.ObjType = Method
+				o.setParent(r.Obj())
+			case *types.Interface:
+				o.ObjType = Interface
+			default:
+				// This should never happen
+			}
+		}
+	default:
+		o.ObjType = Bad
+	}
+	return o, nil
+}
+
+func derefType(t types.Type) types.Type {
+	if p, ok := t.(*types.Pointer); ok {
+		return p.Elem()
+	}
+	return t
+}
+
+func oldObject(obj types.Object) (*Object, error) {
+	o := &Object{
+		Name: obj.Name(),
 	}
 	if obj.Pkg() != nil {
 		o.PkgPath = obj.Pkg().Path()
@@ -122,6 +187,7 @@ func newObject(obj types.Object) (*Object, error) {
 	}
 	switch typ := obj.(type) {
 	case *types.Const:
+		// WARN: set package and name?
 		o.ObjType = Const
 	case *types.Var:
 		switch t := typ.Type().(type) {
