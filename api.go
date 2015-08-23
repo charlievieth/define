@@ -79,6 +79,47 @@ func ObjectOf(filename string, cursor int) (types.Object, *types.Selection, erro
 	return lookupType(node, info)
 }
 
+func FindObject(filename string, cursor int) (*Object, error) {
+	text, off, err := readSourceOffset(filename, cursor, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkSelection(text, off); err != nil {
+		return nil, err
+	}
+	af, fset, err := parseFile(filename, text)
+	if err != nil {
+		return nil, err
+	}
+	node, err := nodeAtOffset(af, fset, cursor)
+	if err != nil {
+		return nil, err
+	}
+	ctx := newContext(filename, af, fset, &build.Default)
+	info := &types.Info{
+		Defs: make(map[*ast.Ident]types.Object),
+		Uses: make(map[*ast.Ident]types.Object),
+	}
+	if _, ok := node.(*ast.SelectorExpr); ok {
+		info.Selections = make(map[*ast.SelectorExpr]*types.Selection)
+	}
+	conf := types.Config{}
+	if _, err := conf.Check(ctx.dirname, ctx.fset, ctx.files, info); err != nil {
+		// Return error only if missing type info.
+		if len(info.Defs) == 0 && len(info.Uses) == 0 {
+			return nil, err
+		}
+	}
+	obj, sel, err := lookupType(node, info)
+	if err != nil {
+		return nil, err
+	}
+	if sel != nil {
+		return newSelector(sel)
+	}
+	return newObject(obj)
+}
+
 func Define(filename string, cursor int, src interface{}) (*Position, error) {
 	text, off, err := readSourceOffset(filename, cursor, src)
 	if err != nil {
