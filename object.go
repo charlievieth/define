@@ -66,11 +66,6 @@ func (p Position) String() string {
 	return s
 }
 
-// WARN: Remove if unused.
-type pkger interface {
-	Pkg() *types.Package
-}
-
 type Object struct {
 	Name     string
 	Parent   string // parent type
@@ -79,11 +74,9 @@ type Object struct {
 	ObjType  Type // only relevanty when finding imported types
 	Position Position
 	IsField  bool // only relevant when finding imported types
-	Methods  []string
 	Pos      token.Pos
 }
 
-// WARN: Remove if unused.
 func (o *Object) setPkg(p *types.Package) {
 	if p != nil {
 		o.PkgPath = p.Path()
@@ -104,6 +97,7 @@ func newSelector(sel *types.Selection) (*Object, error) {
 	}
 	o := &Object{
 		Name: sel.Obj().Name(),
+		Pos:  sel.Obj().Pos(),
 	}
 	o.setPkg(sel.Obj().Pkg())
 	switch t := derefType(sel.Recv()).(type) {
@@ -144,9 +138,10 @@ func newObject(obj types.Object) (*Object, error) {
 			o.ObjType = TypeName
 			// WARN: This looks wrong
 			o.IsField = false
-			if t.Obj() != nil {
-				o.Name = t.Obj().Name()
-				o.setPkg(t.Obj().Pkg())
+			if obj := t.Obj(); obj != nil {
+				o.Name = obj.Name()
+				o.setPkg(obj.Pkg())
+				o.Pos = obj.Pos() // WARN
 			}
 		}
 	case *types.Func:
@@ -165,6 +160,7 @@ func newObject(obj types.Object) (*Object, error) {
 			}
 		}
 	default:
+		// TODO: log type
 		o.ObjType = Bad
 	}
 	return o, nil
@@ -175,95 +171,6 @@ func derefType(t types.Type) types.Type {
 		return p.Elem()
 	}
 	return t
-}
-
-func oldObject(obj types.Object) (*Object, error) {
-	o := &Object{
-		Name: obj.Name(),
-	}
-	if obj.Pkg() != nil {
-		o.PkgPath = obj.Pkg().Path()
-		o.PkgName = obj.Pkg().Name()
-	}
-	switch typ := obj.(type) {
-	case *types.Const:
-		// WARN: set package and name?
-		o.ObjType = Const
-	case *types.Var:
-		switch t := typ.Type().(type) {
-		case *types.Named:
-			o.ObjType = TypeName
-			o.IsField = false
-			if t.Obj() != nil {
-				o.Name = t.Obj().Name()
-				if p := t.Obj().Pkg(); p != nil {
-					o.PkgPath = p.Path()
-					o.PkgName = p.Name()
-				}
-			}
-		default:
-			o.ObjType = Var
-			o.IsField = typ.IsField()
-			if p := typ.Pkg(); p != nil {
-				o.PkgPath = p.Path()
-				o.PkgName = p.Name()
-			}
-		}
-	case *types.TypeName:
-		o.ObjType = TypeName
-		if p := typ.Pkg(); p != nil {
-			o.PkgPath = p.Path()
-			o.PkgName = p.Name()
-		}
-	case *types.Func:
-		o.ObjType = Func
-		if p := typ.Pkg(); p != nil {
-			o.PkgPath = p.Path()
-			o.PkgName = p.Name()
-		}
-		sig := obj.Type().(*types.Signature)
-		if r := sig.Recv(); r != nil {
-			o.ObjType = Method
-			switch t := r.Type().(type) {
-			case *types.Pointer:
-				// WARN: This shouldnt happen...
-				switch tt := t.Elem().(type) {
-				case *types.Named:
-					if tt.Obj() != nil {
-						o.Parent = tt.Obj().Name()
-					}
-				case *types.Interface:
-					o.ObjType = Interface
-					o.Methods = make([]string, tt.NumMethods())
-					for i := 0; i < tt.NumEmbeddeds(); i++ {
-						// WARN
-						o.Methods[i] = tt.Method(i).Name()
-					}
-				default:
-					o.Parent = elemTypeName(t.Elem().String())
-				}
-			case *types.Named:
-				if t.Obj() != nil {
-					o.Parent = t.Obj().Name()
-				}
-			case *types.Interface:
-				o.ObjType = Interface
-				o.Methods = make([]string, t.NumMethods())
-				for i := 0; i < t.NumEmbeddeds(); i++ {
-					// WARN
-					o.Methods[i] = t.Method(i).Name()
-				}
-				// TODO: This is gonna be hard
-			default:
-				// WARN
-				o.Parent = elemTypeName(t.String())
-			}
-		}
-
-	default:
-		o.ObjType = Bad
-	}
-	return o, nil
 }
 
 func elemTypeName(s string) string {
