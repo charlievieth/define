@@ -296,33 +296,3 @@ func readSource(filename string, src interface{}) ([]byte, error) {
 	}
 	return nil, errors.New("invalid source")
 }
-
-/*
-func readSourceOffset(filename string, cursor int, src interface{}) ([]byte, int, error) {
-	if cursor < 0 {
-		return nil, -1, errors.New("non-positive cursor offset")
-	}
-	switch s := src.(type) {
-	case string:
-		if cursor >= len(s) {
-			return nil, -1, errors.New("offset out of range")
-		}
-		return []byte(s), stringOffset(s, cursor), nil
-	case []byte:
-		if cursor >= len(s) {
-			return nil, -1, errors.New("offset out of range")
-		}
-		return s, byteOffset(s, cursor), nil
-	case nil:
-		b, err := ioutil.ReadFile(filename)
-		if err != nil {
-			return nil, -1, err
-		}
-		if cursor >= len(b) {
-			return nil, -1, errors.New("offset out of range")
-		}
-		return b, byteOffset(b, cursor), nil
-	}
-	return nil, -1, errors.New("invalid source")
-}
-*/

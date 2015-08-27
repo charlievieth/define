@@ -186,7 +186,6 @@ func newObject(obj types.Object, sel *types.Selection) (*Object, error) {
 		if sig := typ.Type().(*types.Signature); sig != nil {
 			o.ObjType = Func
 		} else {
-			fmt.Printf("%#v\n", sig.Recv())
 			switch r := derefType(sig.Recv().Type()).(type) {
 			case *types.Named:
 				o.ObjType = Method
@@ -209,13 +208,4 @@ func derefType(t types.Type) types.Type {
 		return p.Elem()
 	}
 	return t
-}
-
-func elemTypeName(s string) string {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '.' {
-			return s[i+1:]
-		}
-	}
-	return s
 }
