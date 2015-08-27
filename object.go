@@ -183,10 +183,10 @@ func newObject(obj types.Object, sel *types.Selection) (*Object, error) {
 			}
 		}
 	case *types.Func:
-		switch sig := obj.Type().(type) {
-		case nil:
+		if sig := typ.Type().(*types.Signature); sig != nil {
 			o.ObjType = Func
-		case *types.Signature:
+		} else {
+			fmt.Printf("%#v\n", sig.Recv())
 			switch r := derefType(sig.Recv().Type()).(type) {
 			case *types.Named:
 				o.ObjType = Method
