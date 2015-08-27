@@ -17,6 +17,7 @@ const (
 	Func
 	Method
 	Interface
+	Package
 )
 
 var typeNames = [...]string{
@@ -27,6 +28,7 @@ var typeNames = [...]string{
 	"Func",
 	"Method",
 	"Interface",
+	"Package",
 }
 
 func (t Type) String() string {
@@ -91,6 +93,32 @@ func (o *Object) setParent(obj types.Object) {
 	}
 }
 
+func (o *Object) Finder() (f posFinder, err error) {
+	switch o.ObjType {
+	case Const, TypeName, Func, Interface:
+		f = declFinder{Name: o.Name}
+	case Var:
+		if o.IsField {
+			if o.Parent == "" {
+				err = fmt.Errorf("Finder: missing Parent for field: %s", o.Name)
+			}
+			f = fieldFinder{
+				Name:   o.Name,
+				Parent: o.Parent,
+			}
+		} else {
+			f = declFinder{Name: o.Name}
+		}
+	case Method:
+		f = methodFinder{Name: o.Name, TypeName: o.Parent}
+	case Package:
+		f = docFinder{}
+	case Bad:
+		err = errors.New("Finder: bad object type")
+	}
+	return
+}
+
 func newSelector(sel *types.Selection) (*Object, error) {
 	if sel.Obj() == nil {
 		return nil, errors.New("nil Selection object")
@@ -106,6 +134,7 @@ func newSelector(sel *types.Selection) (*Object, error) {
 	default:
 		// TODO: log type
 		// Locally declared type, maybe an anonymous struct.
+		return nil, fmt.Errorf("unexpected Recv type: %#v for object: %#v", t, sel.Obj())
 	}
 	switch sel.Kind() {
 	case types.FieldVal:
@@ -120,13 +149,22 @@ func newSelector(sel *types.Selection) (*Object, error) {
 	return o, nil
 }
 
-func newObject(obj types.Object) (*Object, error) {
+func newObject(obj types.Object, sel *types.Selection) (*Object, error) {
+	// WARN: Dev only
+	if sel != nil {
+		return newSelector(sel)
+	}
 	o := &Object{
 		Name: obj.Name(),
 		Pos:  obj.Pos(),
 	}
 	o.setPkg(obj.Pkg())
 	switch typ := obj.(type) {
+	case *types.PkgName:
+		o.ObjType = Package
+		if p := typ.Imported(); p != nil {
+			o.setPkg(p)
+		}
 	case *types.Const:
 		o.ObjType = Const
 	case *types.TypeName:

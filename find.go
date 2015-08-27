@@ -1,6 +1,7 @@
 package define
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -11,9 +12,36 @@ var (
 	_ = fmt.Sprint("...")
 )
 
-type PosVistor interface {
+type posFinder interface {
+	Candidate(b []byte) bool
+	Find(af *ast.File, fset *token.FileSet) *token.Position
+}
+
+// TODO: Remove if not used
+type posVistor interface {
 	Pos() token.Pos
 	Visit(node ast.Node) (w ast.Visitor)
+}
+
+// Finds top-level (global) declarations
+type declFinder struct {
+	Name string
+}
+
+func (f declFinder) Candidate(b []byte) bool {
+	return bytes.Contains(b, []byte(f.Name))
+}
+
+func (f declFinder) Find(af *ast.File, fset *token.FileSet) *token.Position {
+	if af == nil || fset == nil {
+		return nil
+	}
+	if s := af.Scope; s != nil {
+		if o := s.Lookup(f.Name); o != nil {
+			return positionFor(o.Pos(), fset)
+		}
+	}
+	return nil
 }
 
 type constVistor struct {
@@ -63,6 +91,30 @@ func (v *funcVistor) Visit(node ast.Node) ast.Visitor {
 		return nil
 	}
 	return v
+}
+
+type methodFinder struct {
+	Name     string
+	TypeName string
+}
+
+func (f methodFinder) Candidate(b []byte) bool {
+	if n := bytes.Index(b, []byte(f.TypeName)); n != -1 {
+		return bytes.Index(b[n:], []byte(f.Name)) != -1
+	}
+	return false
+}
+
+func (f methodFinder) Find(af *ast.File, fset *token.FileSet) *token.Position {
+	if af == nil || fset == nil {
+		return nil
+	}
+	v := methodVisitor{
+		Name:     f.Name,
+		TypeName: f.TypeName,
+	}
+	ast.Walk(&v, af)
+	return positionFor(v.pos, fset)
 }
 
 type methodVisitor struct {
@@ -156,6 +208,29 @@ func (v *typeVistor) Visit(node ast.Node) ast.Visitor {
 	return v
 }
 
+// TODO: deprecate in favor of identFinder
+type varFinder struct {
+	Name string
+}
+
+func (f varFinder) Candidate(b []byte) bool {
+	return bytes.Contains(b, []byte(f.Name))
+}
+
+func (f varFinder) Find(af *ast.File, fset *token.FileSet) *token.Position {
+	if af == nil || fset == nil {
+		return nil
+	}
+	if s := af.Scope; s != nil {
+		if o := s.Lookup(f.Name); o != nil {
+			return positionFor(o.Pos(), fset)
+		}
+	}
+	// TODO: check with varVisitor ???
+	return nil
+}
+
+// TOOD: Remove if unused
 type varVistor struct {
 	Name string
 	pos  token.Pos
@@ -181,18 +256,47 @@ func (v *varVistor) Visit(node ast.Node) ast.Visitor {
 	return v
 }
 
-type structVisitor struct {
+type fieldFinder struct {
+	Name   string
+	Parent string
+}
+
+func (f fieldFinder) Candidate(b []byte) bool {
+	if n := bytes.Index(b, []byte(f.Parent)); n != -1 {
+		return bytes.Index(b[n:], []byte(f.Name)) != -1
+	}
+	return false
+}
+
+func (f fieldFinder) Find(af *ast.File, fset *token.FileSet) *token.Position {
+	if af == nil || fset == nil {
+		return nil
+	}
+	// WARN: Debug only!
+	if f.Parent == "" {
+		panic("fieldFinder: parent is required")
+	}
+	v := fieldVisitor{
+		Name:   f.Name,
+		Parent: f.Parent,
+	}
+	ast.Walk(&v, af)
+	return positionFor(v.pos, fset)
+}
+
+// Finds struct fields
+type fieldVisitor struct {
 	Name   string
 	Parent string
 	pos    token.Pos
 	field  bool
 }
 
-func (v *structVisitor) Pos() token.Pos {
+func (v *fieldVisitor) Pos() token.Pos {
 	return v.pos
 }
 
-func (v *structVisitor) Visit(node ast.Node) ast.Visitor {
+func (v *fieldVisitor) Visit(node ast.Node) ast.Visitor {
 	if node == nil || v.pos != token.NoPos {
 		return nil
 	}
@@ -212,69 +316,29 @@ func (v *structVisitor) Visit(node ast.Node) ast.Visitor {
 	return v
 }
 
-// TODO: Remove.  Just find the file with top-level comments, if any.
-type packageVistor struct {
-	Name string
-	pos  token.Pos
+// Finds package doc file.
+type docFinder struct {
+	// TODO: This can be done faster as a seperate find/parse routine - we don't
+	// need the whole file.
 }
 
-func (v *packageVistor) Pos() token.Pos {
-	return v.pos
+// Returns if b contains a comment before the word 'package'.
+func (f docFinder) Candidate(b []byte) bool {
+	if n := bytes.Index(b, []byte("package")); n > 2 {
+		if n = bytes.LastIndex(b[:n], []byte{'\n'}); n > 1 {
+			return bytes.Contains(b[:n], []byte("//")) ||
+				bytes.Contains(b[:n], []byte("/*"))
+		}
+	}
+	return false
 }
 
-func (v *packageVistor) Visit(node ast.Node) ast.Visitor {
+func (d docFinder) Find(af *ast.File, fset *token.FileSet) *token.Position {
+	if af.Comments != nil && len(af.Comments) != 0 {
+		p := fset.Position(af.Comments[0].Pos())
+		return &p
+	}
 	return nil
-}
-
-type posVisiter struct {
-	id1   *ast.Ident
-	id2   *ast.Ident
-	pos1  token.Pos
-	pos2  token.Pos
-	found bool
-}
-
-func (v *posVisiter) Visit(node ast.Node) (w ast.Visitor) {
-	if node == nil {
-		return v
-	}
-	if v.found {
-		return nil
-	}
-	pos := node.Pos()
-	end := node.End()
-	if pos <= v.pos1 && v.pos1 <= end {
-		if vv, ok := node.(*ast.Ident); ok {
-			v.id1 = vv
-			if v.pos2 == 0 || v.id2 != nil {
-				v.found = true
-			}
-		}
-	}
-	if v.pos2 != 0 && pos <= v.pos2 && v.pos2 <= end {
-		if vv, ok := node.(*ast.Ident); ok {
-			v.id2 = vv
-			if v.id1 != nil {
-				v.found = true
-			}
-		}
-	}
-	return v
-}
-
-func identAtPos(af *ast.File, curr, prev token.Pos) (*ast.Ident, *ast.Ident, error) {
-	if af == nil {
-		return nil, nil, errors.New("nil ast.File")
-	}
-	v := posVisiter{
-		pos1: curr,
-		pos2: prev,
-	}
-	ast.Walk(&v, af)
-	if v.id1 == nil && v.id2 == nil {
-		return nil, nil, errors.New("unable to find ident")
-	}
-	return v.id1, v.id2, nil
 }
 
 type offsetVisitor struct {
@@ -350,4 +414,18 @@ func nodeAtOffset(af *ast.File, fset *token.FileSet, offset int) (ast.Node, erro
 		return nil, fmt.Errorf("no node at offset: %d", offset)
 	}
 	return v.node, nil
+}
+
+// positionFor, returns the Position for Pos p in FileSet fset.
+func positionFor(p token.Pos, fset *token.FileSet) *token.Position {
+	if p != token.NoPos && fset != nil {
+		if f := fset.File(p); f != nil {
+			// Prevent panic
+			if f.Base() <= int(p) && int(p) <= f.Base()+f.Size() {
+				p := f.Position(p)
+				return &p
+			}
+		}
+	}
+	return nil
 }
