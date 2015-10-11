@@ -8,10 +8,6 @@ import (
 	"go/token"
 )
 
-var (
-	_ = fmt.Sprint("...")
-)
-
 type posFinder interface {
 	Candidate(b []byte) bool
 	Find(af *ast.File, fset *token.FileSet) *token.Position
