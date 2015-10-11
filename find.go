@@ -17,12 +17,6 @@ type posFinder interface {
 	Find(af *ast.File, fset *token.FileSet) *token.Position
 }
 
-// TODO: Remove if not used
-type posVistor interface {
-	Pos() token.Pos
-	Visit(node ast.Node) (w ast.Visitor)
-}
-
 // Finds top-level (global) declarations
 type declFinder struct {
 	Name string
