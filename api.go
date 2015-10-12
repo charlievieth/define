@@ -18,10 +18,70 @@ type Config struct {
 	Context   build.Context
 }
 
-type Definition struct {
-	Name string
-	Type string
-	Pos  Position
+func (c *Config) Define(filename string, cursor int, src interface{}) (*Position, []byte, error) {
+	// TODO: Refactor this mess!
+	text, err := readSource(filename, src)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := checkSelection(text, cursor); err != nil {
+		return nil, nil, err
+	}
+	af, fset, err := parseFile(filename, text)
+	if err != nil {
+		return nil, nil, err
+	}
+	node, err := nodeAtOffset(af, fset, cursor)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx := newContext(filename, af, fset, &c.Context)
+	info := &types.Info{
+		Defs: make(map[*ast.Ident]types.Object),
+		Uses: make(map[*ast.Ident]types.Object),
+	}
+	if _, ok := node.(*ast.SelectorExpr); ok {
+		info.Selections = make(map[*ast.SelectorExpr]*types.Selection)
+	}
+	conf := types.Config{}
+	if _, err := conf.Check(ctx.dirname, ctx.fset, ctx.files, info); err != nil {
+		// Return error only if missing type info.
+		if len(info.Defs) == 0 && len(info.Uses) == 0 {
+			return nil, nil, err
+		}
+	}
+	obj, sel, err := lookupType(node, info)
+	if err != nil {
+		return nil, nil, err
+	}
+	o, err := newObject(obj, sel)
+	if err != nil {
+		return nil, nil, err
+	}
+	f, err := o.Finder()
+	if err != nil {
+		return nil, nil, err
+	}
+	tp, objSrc, err := ctx.objectPosition(o.PkgPath, f)
+	if err != nil {
+		if o.Pos.IsValid() {
+			if p := positionFor(o.Pos, fset); p != nil {
+				return newPosition(*p), objSrc, nil
+			}
+		}
+		return nil, nil, err
+	}
+	return newPosition(*tp), objSrc, nil
+}
+
+var defaultConfig = Config{
+	UseOffset: false,
+	Context:   build.Default,
+}
+
+func Define(filename string, cursor int, src interface{}) (*Position, error) {
+	pos, _, err := defaultConfig.Define(filename, cursor, src)
+	return pos, err
 }
 
 func NodeAtOffset(filename string, cursor int, src interface{}) (ast.Node, token.Position, error) {
@@ -118,61 +178,6 @@ func FindObject(filename string, cursor int) (*Object, error) {
 		return newSelector(sel)
 	}
 	return newObject(obj, nil)
-}
-
-func Define(filename string, cursor int, src interface{}) (*Position, error) {
-	text, off, err := readSourceOffset(filename, cursor, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkSelection(text, off); err != nil {
-		return nil, err
-	}
-	af, fset, err := parseFile(filename, text)
-	if err != nil {
-		return nil, err
-	}
-	node, err := nodeAtOffset(af, fset, cursor)
-	if err != nil {
-		return nil, err
-	}
-	ctx := newContext(filename, af, fset, &build.Default)
-	info := &types.Info{
-		Defs: make(map[*ast.Ident]types.Object),
-		Uses: make(map[*ast.Ident]types.Object),
-	}
-	if _, ok := node.(*ast.SelectorExpr); ok {
-		info.Selections = make(map[*ast.SelectorExpr]*types.Selection)
-	}
-	conf := types.Config{}
-	if _, err := conf.Check(ctx.dirname, ctx.fset, ctx.files, info); err != nil {
-		// Return error only if missing type info.
-		if len(info.Defs) == 0 && len(info.Uses) == 0 {
-			return nil, err
-		}
-	}
-	obj, sel, err := lookupType(node, info)
-	if err != nil {
-		return nil, err
-	}
-	o, err := newObject(obj, sel)
-	if err != nil {
-		return nil, err
-	}
-	f, err := o.Finder()
-	if err != nil {
-		return nil, err
-	}
-	tp, err := ctx.objectPosition(o.PkgPath, f)
-	if err != nil {
-		if o.Pos.IsValid() {
-			if p := positionFor(o.Pos, fset); p != nil {
-				return newPosition(*p), nil
-			}
-		}
-		return nil, err
-	}
-	return newPosition(*tp), nil
 }
 
 func newTypeInfo(node ast.Node) *types.Info {

@@ -53,20 +53,22 @@ func newContext(filename string, af *ast.File, fset *token.FileSet, ctx *build.C
 
 type findRes struct {
 	pos *token.Position
+	src []byte
 	err error
 }
 
-func (c *context) objectPosition(pkgpath string, f posFinder) (*token.Position, error) {
+func (c *context) objectPosition(pkgpath string, f posFinder) (*token.Position, []byte, error) {
 	if f == nil {
-		return nil, errors.New("objectPosition: nil finder")
+		// should not happen
+		return nil, nil, errors.New("define: nil finder")
 	}
 	path, err := c.pkgPath(pkgpath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	names, err := pkgFiles(&build.Default, path, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	chs := make([]chan *findRes, 0, len(names))
 	for _, name := range names {
@@ -77,9 +79,10 @@ func (c *context) objectPosition(pkgpath string, f posFinder) (*token.Position, 
 		switch p := <-ch; {
 		case p == nil:
 			// should not happen
-			panic("nil response on find chan")
+			first = errors.New("define: nil response on find chan")
 		case p.pos != nil:
-			return p.pos, nil
+			// Exit: success
+			return p.pos, p.src, nil
 		case p.err != nil && first == nil:
 			first = err
 		}
@@ -88,7 +91,7 @@ func (c *context) objectPosition(pkgpath string, f posFinder) (*token.Position, 
 		// WARN: Dev only
 		first = fmt.Errorf("pkgpath: %s finder: %#v", pkgpath, f)
 	}
-	return nil, first
+	return nil, nil, first
 }
 
 func searchAstFile(path string, f posFinder) chan *findRes {
@@ -98,10 +101,10 @@ func searchAstFile(path string, f posFinder) chan *findRes {
 		if b != nil && f.Candidate(b) {
 			af, fset, err := parseFile(path, b)
 			pos := f.Find(af, fset)
-			ch <- &findRes{pos: pos, err: err}
+			ch <- &findRes{pos: pos, src: b, err: err}
 		} else {
 			// Send read err if b is nil.
-			ch <- &findRes{pos: nil, err: err}
+			ch <- &findRes{err: err}
 		}
 	}()
 	return ch
