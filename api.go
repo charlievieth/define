@@ -74,13 +74,13 @@ func (c *Config) Define(filename string, cursor int, src interface{}) (*Position
 	return newPosition(*tp), objSrc, nil
 }
 
-var defaultConfig = Config{
+var DefaultConfig = Config{
 	UseOffset: false,
 	Context:   build.Default,
 }
 
 func Define(filename string, cursor int, src interface{}) (*Position, error) {
-	pos, _, err := defaultConfig.Define(filename, cursor, src)
+	pos, _, err := DefaultConfig.Define(filename, cursor, src)
 	return pos, err
 }
 
