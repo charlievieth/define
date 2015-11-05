@@ -10,7 +10,8 @@ import (
 type Type int
 
 const (
-	Bad Type = iota
+	Invalid Type = iota
+	Bad
 	Const
 	Var
 	TypeName
@@ -21,6 +22,7 @@ const (
 )
 
 var typeNames = [...]string{
+	"Invalid",
 	"Bad",
 	"Const",
 	"Var",
@@ -32,7 +34,10 @@ var typeNames = [...]string{
 }
 
 func (t Type) String() string {
-	return typeNames[t]
+	if int(t) < len(typeNames) {
+		return typeNames[t]
+	}
+	return typeNames[Invalid]
 }
 
 // Same as token.Position
@@ -43,13 +48,9 @@ type Position struct {
 	Column   int    // column number, starting at 1 (character count)
 }
 
-func newPosition(p token.Position) *Position {
-	return &Position{
-		Filename: p.Filename,
-		Line:     p.Line,
-		Column:   p.Column,
-		Offset:   p.Offset,
-	}
+func newPosition(tp token.Position) *Position {
+	p := Position(tp)
+	return &p
 }
 
 func (p Position) IsValid() bool { return p.Line > 0 }
@@ -76,7 +77,7 @@ type Object struct {
 	ObjType  Type // only relevanty when finding imported types
 	Position Position
 	IsField  bool // only relevant when finding imported types
-	Pos      token.Pos
+	pos      token.Pos
 }
 
 func (o *Object) setPkg(p *types.Package) {
@@ -125,7 +126,7 @@ func newSelector(sel *types.Selection) (*Object, error) {
 	}
 	o := &Object{
 		Name: sel.Obj().Name(),
-		Pos:  sel.Obj().Pos(),
+		pos:  sel.Obj().Pos(),
 	}
 	o.setPkg(sel.Obj().Pkg())
 	switch t := derefType(sel.Recv()).(type) {
@@ -156,7 +157,7 @@ func newObject(obj types.Object, sel *types.Selection) (*Object, error) {
 	}
 	o := &Object{
 		Name: obj.Name(),
-		Pos:  obj.Pos(),
+		pos:  obj.Pos(),
 	}
 	o.setPkg(obj.Pkg())
 	switch typ := obj.(type) {
@@ -179,7 +180,7 @@ func newObject(obj types.Object, sel *types.Selection) (*Object, error) {
 			if obj := t.Obj(); obj != nil {
 				o.Name = obj.Name()
 				o.setPkg(obj.Pkg())
-				o.Pos = obj.Pos() // WARN
+				o.pos = obj.Pos() // WARN
 			}
 		}
 	case *types.Func:
